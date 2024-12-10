@@ -38,7 +38,7 @@ class Stopwatch:
 
 
 def create_command_line_arguments_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Parallel search of prime nunbers", formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Parallel search of prime numbers", formatter_class=RawTextHelpFormatter)
 
     # positional mandatory arguments
     parser.add_argument("start",
