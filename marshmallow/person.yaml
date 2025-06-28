@@ -1,0 +1,8 @@
+first_name: Mark
+last_name: Allen
+birth_date: "1958-07-12"
+address:
+    street: Pusta 3
+    city: Bratislava
+    country: Czechoslovakia
+    zip_code: "84104"
