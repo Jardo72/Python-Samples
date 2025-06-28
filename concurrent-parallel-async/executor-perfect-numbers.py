@@ -2,10 +2,9 @@ from __future__ import annotations
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
-from math import isqrt
 from multiprocessing import cpu_count, current_process
 from time import perf_counter
-from typing import List
+from typing import List, Tuple
 
 
 @dataclass(frozen=True)
@@ -15,11 +14,17 @@ class SearchRange:
 
 
 @dataclass(frozen=True)
+class PerfectNumber:
+    number: int
+    divisors: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class SearchResult:
     process: str
     duration_millis: int
     search_range: SearchRange
-    prime_numbers: List[int]
+    perfect_numbers: List[int]
 
 
 class Stopwatch:
@@ -38,17 +43,17 @@ class Stopwatch:
 
 
 def create_command_line_arguments_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Parallel search of prime numbers", formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Parallel search of perfect numbers", formatter_class=RawTextHelpFormatter)
 
     # positional mandatory arguments
     parser.add_argument("start",
-        help = "the start of the range of integers in which prime numbers are to be searched",
+        help = "the start of the range of integers in which perfect numbers are to be searched",
         type=int)
     parser.add_argument("end",
-        help = "the end of the range of integers in which prime numbers are to be searched",
+        help = "the end of the range of integers in which perfect numbers are to be searched",
         type=int)
     parser.add_argument("output_file",
-        help = "the name of the output file the prime numbers are to be written to",
+        help = "the name of the output file the perfect numbers are to be written to",
         type=str)
 
     # optional arguments
@@ -104,35 +109,39 @@ def create_executor(executor: str, max_workers: int) -> ThreadPoolExecutor | Pro
         raise ValueError(f"Unknown executor type: {executor}. Use 'thread' or 'process'.")
 
 
-def is_prime_number(value: int) -> bool:
-    if value % 2 == 0:
-        return False
-    for divider in range(3, isqrt(value) + 1, 2):
-        if value % divider == 0:
-            return False
-    return True
+def is_perfect_number(value: int) -> PerfectNumber | None:
+    divisors = []
+    for divisor in range(1, value // 2 + 1):
+        if value % divisor == 0:
+            divisors.append(divisor)
+    if sum(divisors) == value:
+        return PerfectNumber(number=value, divisors=tuple(divisors))
+    else:
+        return None
 
 
-def get_prime_numbers(search_range: SearchRange) -> SearchResult:
+def get_perfect_numbers(search_range: SearchRange) -> SearchResult:
     stopwatch = Stopwatch()
-    prime_numbers = []
+    perfect_numbers = []
 
     for value in range(search_range.min, search_range.max + 1):
-        if is_prime_number(value):
-            prime_numbers.append(value)
+        perfect_number = is_perfect_number(value)
+        if perfect_number:
+            perfect_numbers.append(perfect_number)
 
     return SearchResult(
         process=current_process_name(),
         duration_millis=stopwatch.elapsed_time_millis(),
         search_range=search_range,
-        prime_numbers=prime_numbers
+        perfect_numbers=perfect_numbers
     )
 
 
-def write_to_file(prime_numbers: List[int], filename: str) -> None:
+def write_to_file(perfect_numbers: List[PerfectNumber], filename: str) -> None:
     with open(filename, "w") as output_file:
-        for number in prime_numbers:
-            output_file.write(f"{number}\n")
+        for perfect_number in perfect_numbers:
+            divisors = " + ".join(map(lambda d: str(d), perfect_number.divisors))
+            output_file.write(f"{perfect_number.number} = {divisors}\n")
 
 
 def format_duration(duration_sec: float) -> str:
@@ -158,20 +167,23 @@ def main() -> None:
         start = command_line_arguments.start
         while start <= command_line_arguments.end:
             end = min(start + command_line_arguments.bulk_size - 1, command_line_arguments.end)
-            future = executor.submit(get_prime_numbers, SearchRange(start, end))
+            future = executor.submit(get_perfect_numbers, SearchRange(start, end))
             future_list.append(future)
             start += command_line_arguments.bulk_size
 
-        prime_numbers = []
-        for future in future_list:
+        print()
+        perfect_numbers = []
+        for i, future in enumerate(future_list):
             search_result = future.result()
-            prime_numbers += search_result.prime_numbers
+            perfect_numbers += search_result.perfect_numbers
+            if (i + 1) % 25 == 0:
+                print(f"Bulk {i + 1}/{len(future_list)} completed...")
 
         duration_millis = stopwatch.elapsed_time_millis()
-        write_to_file(prime_numbers, command_line_arguments.output_file)
-        print(f"Overall number of prime numbers found: {len(prime_numbers)}")
-        print(f"Overall search duration:               {duration_millis} ms ({format_duration(duration_millis / 1000)})")
-        print(f"Batch count:                           {len(future_list)}")
+        write_to_file(perfect_numbers, command_line_arguments.output_file)
+        print(f"Overall number of perfect numbers found: {len(perfect_numbers)}")
+        print(f"Overall search duration:                 {duration_millis} ms ({format_duration(duration_millis / 1000)})")
+        print(f"Batch count:                             {len(future_list)}")
 
 
 if __name__ == "__main__":

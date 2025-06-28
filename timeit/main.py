@@ -59,6 +59,5 @@ def main() -> None:
     print(f"n = {n}, repetitions = {repetitions}, plain duration = {plain_duration:.5f} sec, recursive duration = {recursive_duration:.5f} sec")
 
 
-
 if __name__ == "__main__":
     main()
