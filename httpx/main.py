@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List
 
 import httpx
+from marshmallow import Schema, fields, post_load
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,49 @@ class User:
     company: Company
 
 
+class GeoSchema(Schema):
+    lat = fields.Str()
+    lng = fields.Str()
+
+    @post_load
+    def make_geo(self, data, **kwargs):
+        return Geo(**data)
+
+class AddressSchema(Schema):
+    street = fields.Str()
+    suite = fields.Str()
+    city = fields.Str()
+    zip_code = fields.Str(data_key="zipcode")
+    geo = fields.Nested(GeoSchema)
+
+    @post_load
+    def make_address(self, data, **kwargs):
+        return Address(**data)
+
+class CompanySchema(Schema):
+    name = fields.Str()
+    catch_phrase = fields.Str(data_key="catchPhrase")
+    bs = fields.Str()
+
+    @post_load
+    def make_company(self, data, **kwargs):
+        return Company(**data)
+
+class UserSchema(Schema):
+    id = fields.Int()
+    name = fields.Str()
+    username = fields.Str()
+    email = fields.Str()
+    address = fields.Nested(AddressSchema)
+    phone = fields.Str()
+    website = fields.Str()
+    company = fields.Nested(CompanySchema)
+
+    @post_load
+    def make_user(self, data, **kwargs):
+        return User(**data)
+
+
 class RestApiError(Exception):
     ...
 
@@ -54,6 +98,7 @@ class RestApiClient:
         if response.status_code != 200:
             raise RestApiError(f"Failed to fetch users: {response.status_code}")
         response_data = response.json()
+        [for user_data in response_data]
         return []
 
 
