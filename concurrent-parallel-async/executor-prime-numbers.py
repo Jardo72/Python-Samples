@@ -55,8 +55,16 @@ class Stopwatch:
         return int(1000 * duration)
 
 
+def epilog() -> str:
+    return """
+This script finds all prime numbers in the given range using parallel processing.
+Depending on the specified executor type, it uses either multithreading or multiprocessing.
+The prime numbers are written to the specified output file.
+"""
+
+
 def create_command_line_arguments_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Parallel search of prime numbers", formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Parallel search of prime numbers", formatter_class=RawTextHelpFormatter, epilog=epilog())
 
     # positional mandatory arguments
     parser.add_argument("start",

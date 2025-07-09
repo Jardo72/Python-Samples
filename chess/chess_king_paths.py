@@ -23,8 +23,17 @@ from re import match
 from typing import Tuple
 
 
+def epilog() -> str:
+    return """
+This script finds all paths of a chess king from the given start square to the given
+destination square of a chessboard. A path is valid if it does not exceed the specified
+maximum number of moves. The squares are specified in numeric lowercase notation (e.g.
+c1, d4, h8). The script checks for duplicate paths and raises an error if any are found.
+"""
+
+
 def create_cmd_line_args() -> ArgumentParser:
-    parser = ArgumentParser(description="Chess King Path Finder", formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Chess King Path Finder", formatter_class=RawTextHelpFormatter, epilog=epilog())
     
     parser.add_argument(
         "start_square",
