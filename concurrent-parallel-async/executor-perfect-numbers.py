@@ -60,8 +60,19 @@ class Stopwatch:
         return int(1000 * duration)
 
 
+def epilog() -> str:
+    return """
+This script finds all perfect numbers in the given range using parallel processing.
+Depending on the specified executor type, it uses either multithreading or multiprocessing.
+The prime numbers are written to the specified output file.
+
+A perfect number is a positive integer that is equal to the sum of its proper positive divisors, excluding itself.
+For example, the first perfect number is 6, because its divisors are 1, 2, and 3, and 1 + 2 + 3 = 6.
+"""
+
+
 def create_command_line_arguments_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Parallel search of perfect numbers", formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Parallel search of perfect numbers", formatter_class=RawTextHelpFormatter, epilog=epilog())
 
     # positional mandatory arguments
     parser.add_argument("start",
