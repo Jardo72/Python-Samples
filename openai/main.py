@@ -25,15 +25,15 @@ Set the environment variable 'OPENAI_API_KEY' with your API key.
 The configuration file should be in INI format with the following structure:
 
 [OpenAI]
-api_base = https://api.openai.com/v1
-model = text-davinci-002
+api_base = https://api.openai.com/v1/models
+model = gpt-4.0-mini
 role = user
 """
 
 
 def parse_cmd_line_args() -> Namespace:
     parser = ArgumentParser(
-        description="OpenAI API client",
+        description="OpenAI API Client",
         formatter_class=RawTextHelpFormatter,
         epilog=epilog(),
     )
@@ -41,6 +41,11 @@ def parse_cmd_line_args() -> Namespace:
         "config_file",
         type=str,
         help="Path to the configuration file containing API settings (INI format expected).",
+    )
+    parser.add_argument(
+        "prompt",
+        type=str,
+        help="Prompt to be sent to OpenAI API.",
     )
     return parser.parse_args()
 
@@ -74,12 +79,15 @@ def main() -> None:
         configuration = read_configuration(cmd_line_args.config_file)
 
         openai_client = OpenAI(api_key=configuration.api_key) # , api_base=configuration.api_base
-        response = openai_client.responses.create(
+        response = openai_client.chat.completions.create(
             model=configuration.model,
-            input="Do you believe this is my first API request using OpenAI?",
+            messages=[{"role": configuration.role, "content": cmd_line_args.prompt}],
         )
 
-        print(response)
+        print()
+        print("Response from OpenAI API:")
+        print(response.choices[0].message.content)
+        print()
     except MissingAPIKeyError as e:
         print(f"Error: {str(e)}")
 
