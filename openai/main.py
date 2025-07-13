@@ -78,7 +78,7 @@ def main() -> None:
         cmd_line_args = parse_cmd_line_args()
         configuration = read_configuration(cmd_line_args.config_file)
 
-        openai_client = OpenAI(api_key=configuration.api_key) # , api_base=configuration.api_base
+        openai_client = OpenAI(api_key=configuration.api_key, base_url=configuration.api_base)
         response = openai_client.chat.completions.create(
             model=configuration.model,
             messages=[{"role": configuration.role, "content": cmd_line_args.prompt}],
