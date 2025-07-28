@@ -21,25 +21,22 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from re import match, IGNORECASE
 from shutil import copytree
 from time import perf_counter
+from typing import Optional
 
 
 @dataclass(frozen=True)
 class Configuration:
     source_path: str
     destination_path: str
-    range_start: int | None
-    range_end: int | None
-    workers: int | None
+    regex_filter: Optional[str]
+    workers: Optional[int]
 
     def __post_init__(self) -> None:
-        if self.range_start is not None and self.range_start < 0:
-            raise ValueError("range_start must be a non-negative integer")
-        if self.range_end is not None and self.range_end < 0:
-            raise ValueError("range_end must be a non-negative integer")
-        if self.workers is not None and not 1 <= self.workers <= 10:
-            raise ValueError("workers must be a positive integer")
+        if self.workers is not None and not 1 <= self.workers <= 12:
+            raise ValueError("workers must be a positive integer between 1 and 12")
 
 
 @dataclass(frozen=True)
@@ -52,7 +49,7 @@ class CopyRequest:
 class CopyResult:
     request: CopyRequest
     duration_millis: int
-    exception: Exception | None = None
+    exception: Optional[Exception] = None
 
 
 @dataclass(frozen=True)
@@ -79,11 +76,10 @@ class Stopwatch:
 
 def epilog() -> str:
     return """
-This script copies a directory structure in parallel, allowing for optional
-specification of a range of subdirectories to copy and the number of workers
-to use. The source and destination paths must be specified, and the range
-of subdirectories can be limited using the --range-start and --range-end options.
-The specified source directory is copied recursively to the destination directory.
+This script copies the given directory structure to the specified destination.
+The copying is recursive and parallel, with configurable number of worker threads.
+Optionally, it supports filtering subdirectories using a regex pattern. Subdirectories
+not matching the regex filter will be skipped. The filter is case-insensitive.
 """
 
 
@@ -99,14 +95,10 @@ def create_cmd_line_args_parser() -> ArgumentParser:
         type=str)
 
     # optional arguments
-    parser.add_argument("-s", "--range-start",
-        dest="range_start",
-        help="optional start index in alphabetically orderered list of subdirectories to be copied (default = first subdirectory)",
-        type=int)
-    parser.add_argument("-e", "--range-end",
-        dest="range_end",
-        help="optional end index in alphabetically orderered list of subdirectories to be copied (default = last subdirectory)",
-        type=int)
+    parser.add_argument("-f", "--regex-filter",
+        dest="regex_filter",
+        help="optional regex pattern (case-insensitive) for filtering subdirectories to copy (default = all subdirectories)",
+        type=str)
     parser.add_argument("-w", "--workers",
         dest="workers",
         default=4,
@@ -122,14 +114,20 @@ def parse_cmd_line_args() -> Configuration:
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
-        range_start=params.range_start,
-        range_end=params.range_end,
+        regex_filter=params.regex_filter,
         workers=params.workers
     )
 
 
-def get_sorted_subdirs(directory: str) -> tuple[str, ...]:
-    result = [str(p) for p in Path(directory).iterdir() if p.is_dir()]
+def get_sorted_subdirs(config: Configuration) -> tuple[str, ...]:
+    result = []
+    for path in Path(config.source_path).iterdir():
+        if not path.is_dir():
+            continue
+        if config.regex_filter is not None:
+            if not match(config.regex_filter, path.name, flags=IGNORECASE):
+                continue
+        result.append(str(path))
     return tuple(sorted(result))
 
 
@@ -207,7 +205,7 @@ def print_summary(config: Configuration, summary: Summary) -> None:
 
 def main() -> None:
     config = parse_cmd_line_args()
-    source_list = get_sorted_subdirs(config.source_path)
+    source_list = get_sorted_subdirs(config)
     summary = copy_subdirs(config, source_list)
     print_summary(config, summary)
 
