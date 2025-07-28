@@ -55,6 +55,13 @@ class CopyResult:
     exception: Exception | None = None
 
 
+@dataclass(frozen=True)
+class Summary:
+    overall_duration_millis: int
+    success_count: int
+    failure_count: int
+
+
 class Stopwatch:
 
     def __init__(self) -> None:
@@ -144,7 +151,7 @@ def copy_subdir(request: CopyRequest) -> CopyResult:
         )
 
 
-def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> None:
+def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> Summary:
     Path(config.destination_path).mkdir(parents=True, exist_ok=True)
     executor = ThreadPoolExecutor(max_workers=config.workers)
     stopwatch = Stopwatch()
@@ -164,30 +171,45 @@ def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> None:
     for future in future_list:
         result = future.result()
         if result.exception is None:
-            print(f"Successfully copied {result.request.source} to {result.request.destination} in {result.duration_millis} ms")
+            formatted_duration = format_duration(result.duration_millis)
+            print(f"Successfully copied {result.request.source} to {result.request.destination} in {result.duration_millis} ms ({formatted_duration})")
             success_count += 1
         else:
             print(f"Failed to copy {result.request.source} to {result.request.destination}")
             print(str(result.exception))
             failure_count += 1
 
-    duration_millis = stopwatch.elapsed_time_millis()
-    print(f"Overall duration:  {duration_millis} ms ({format_duration(duration_millis / 1000)})")
-    print(f"Successful copies: {success_count}")
-    print(f"Failed copies:     {failure_count}")
+    return Summary(
+        overall_duration_millis=stopwatch.elapsed_time_millis(),
+        success_count= success_count,
+        failure_count=failure_count
+    )
 
 
-def format_duration(duration_sec: float) -> str:
-    duration_sec = round(duration_sec)
+def format_duration(duration_millis: int) -> str:
+    duration_sec = round(duration_millis / 1000)
     hours, remainder = divmod(duration_sec, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 
+def print_summary(config: Configuration, summary: Summary) -> None:
+    print()
+    formatted_duration = format_duration(summary.overall_duration_millis)
+    print(f"Source path:                        {config.source_path}")
+    print(f"Destination path:                   {config.destination_path}")
+    print(f"Workers:                            {config.workers}")
+    print(f"Overall duration:                   {summary.overall_duration_millis} ms ({formatted_duration})")
+    print(f"Successfully copied subdirectories: {summary.success_count}")
+    print(f"Failed subdirectories:              {summary.failure_count}")
+    print()
+
+
 def main() -> None:
     config = parse_cmd_line_args()
     source_list = get_sorted_subdirs(config.source_path)
-    copy_subdirs(config, source_list)
+    summary = copy_subdirs(config, source_list)
+    print_summary(config, summary)
 
 
 if __name__ == "__main__":
