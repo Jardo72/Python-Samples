@@ -24,7 +24,12 @@ from pathlib import Path
 from re import match, IGNORECASE
 from shutil import copytree
 from time import perf_counter
+from traceback import print_exc
 from typing import Optional
+
+
+class InvalidConfigurationError(Exception):
+    ...
 
 
 @dataclass(frozen=True)
@@ -35,8 +40,10 @@ class Configuration:
     workers: Optional[int]
 
     def __post_init__(self) -> None:
+        if not Path(self.source_path).is_dir():
+            raise InvalidConfigurationError(f"Source path '{self.source_path}' is not a valid directory.")
         if self.workers is not None and not 1 <= self.workers <= 12:
-            raise ValueError("workers must be a positive integer between 1 and 12")
+            raise InvalidConfigurationError("Number of workers must be a positive integer between 1 and 16")
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,7 @@ def epilog() -> str:
     return """
 This script copies the given directory structure to the specified destination.
 The copying is recursive and parallel, with configurable number of worker threads.
+If the destination directory does not exist, the script will create it.
 Optionally, it supports filtering subdirectories using a regex pattern. Subdirectories
 not matching the regex filter will be skipped. The filter is case-insensitive.
 """
@@ -204,10 +212,19 @@ def print_summary(config: Configuration, summary: Summary) -> None:
 
 
 def main() -> None:
-    config = parse_cmd_line_args()
-    source_list = get_sorted_subdirs(config)
-    summary = copy_subdirs(config, source_list)
-    print_summary(config, summary)
+    try:
+        config = parse_cmd_line_args()
+        source_list = get_sorted_subdirs(config)
+        summary = copy_subdirs(config, source_list)
+        print_summary(config, summary)
+    except InvalidConfigurationError as e:
+        print("ERROR!!! Invalid command line arguments.")
+        print(str(e))
+        exit(1)
+    except Exception as e:
+        print("ERROR!!! An unexpected exception has occurred.")
+        print_exc()
+        exit(1)
 
 
 if __name__ == "__main__":
