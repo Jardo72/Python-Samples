@@ -48,6 +48,13 @@ class CopyRequest:
     destination: str
 
 
+@dataclass(frozen=True)
+class CopyResult:
+    request: CopyRequest
+    duration_millis: int
+    exception: Exception | None = None
+
+
 class Stopwatch:
 
     def __init__(self) -> None:
@@ -119,15 +126,26 @@ def get_sorted_subdirs(directory: str) -> tuple[str, ...]:
     return tuple(sorted(result))
 
 
-def copy_subdir(request: CopyRequest) -> None:
+def copy_subdir(request: CopyRequest) -> CopyResult:
     print(f"Going to copy {request.source} to {request.destination}")
-    # TODO:
-    # copytree(request.source, request.destination, dirs_exist_ok=True)
-    sleep(25)
-    print(f"Copied {request.source} to {request.destination}")
+    stopwatch = Stopwatch.start()
+    try:
+        copytree(request.source, request.destination, dirs_exist_ok=True)
+        duration_millis = stopwatch.elapsed_time_millis()
+        return CopyResult(
+            request=request,
+            duration_millis=duration_millis
+        )
+    except Exception as e:
+        return CopyResult(
+            request=request,
+            duration_millis=stopwatch.elapsed_time_millis(),
+            exception=e
+        )
 
 
 def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> None:
+    Path(config.destination_path).mkdir(parents=True, exist_ok=True)
     executor = ThreadPoolExecutor(max_workers=config.workers)
     stopwatch = Stopwatch()
     future_list = []
@@ -141,14 +159,22 @@ def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> None:
         future = executor.submit(copy_subdir, request)
         future_list.append(future)
     
+    success_count = 0
+    failure_count = 0
     for future in future_list:
-        try:
-            future.result()  # Wait for the future to complete and raise any exceptions
-        except Exception as e:
-            print(f"Error occurred while copying: {e}")
+        result = future.result()
+        if result.exception is None:
+            print(f"Successfully copied {result.request.source} to {result.request.destination} in {result.duration_millis} ms")
+            success_count += 1
+        else:
+            print(f"Failed to copy {result.request.source} to {result.request.destination}")
+            print(str(result.exception))
+            failure_count += 1
 
     duration_millis = stopwatch.elapsed_time_millis()
-    print(f"Overall duration: {duration_millis} ms ({format_duration(duration_millis / 1000)})")
+    print(f"Overall duration:  {duration_millis} ms ({format_duration(duration_millis / 1000)})")
+    print(f"Successful copies: {success_count}")
+    print(f"Failed copies:     {failure_count}")
 
 
 def format_duration(duration_sec: float) -> str:
