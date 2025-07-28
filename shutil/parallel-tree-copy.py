@@ -21,12 +21,14 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from re import match, IGNORECASE
+from re import compile, IGNORECASE
 from shutil import copytree
 from time import perf_counter
 from traceback import print_exc
 from typing import Optional
 
+
+MAX_WORKERS = 16
 
 class InvalidConfigurationError(Exception):
     ...
@@ -42,8 +44,8 @@ class Configuration:
     def __post_init__(self) -> None:
         if not Path(self.source_path).is_dir():
             raise InvalidConfigurationError(f"Source path '{self.source_path}' is not a valid directory.")
-        if self.workers is not None and not 1 <= self.workers <= 12:
-            raise InvalidConfigurationError("Number of workers must be a positive integer between 1 and 16")
+        if self.workers is not None and not 1 <= self.workers <= MAX_WORKERS:
+            raise InvalidConfigurationError(f"Number of workers must be a positive integer between 1 and {MAX_WORKERS}")
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,7 @@ def create_cmd_line_args_parser() -> ArgumentParser:
     parser.add_argument("-w", "--workers",
         dest="workers",
         default=4,
-        help="optional number of workers (threads or processes) to be used (default = 4)",
+        help=f"optional number of worker threads to be used (default = 4, max = {MAX_WORKERS})",
         type=int)
 
     return parser
@@ -128,14 +130,25 @@ def parse_cmd_line_args() -> Configuration:
 
 
 def get_sorted_subdirs(config: Configuration) -> tuple[str, ...]:
+    ignored_count = 0
     result = []
+
+    regex = compile(config.regex_filter, IGNORECASE) if config.regex_filter else None
     for path in Path(config.source_path).iterdir():
         if not path.is_dir():
             continue
         if config.regex_filter is not None:
-            if not match(config.regex_filter, path.name, flags=IGNORECASE):
+            if regex is not None and not regex.match(path.name):
+                ignored_count += 1
                 continue
         result.append(str(path))
+
+    print()
+    print(f"{len(result)} relevant subdirectories found in '{config.source_path}'")
+    if ignored_count > 0:
+        print(f"{ignored_count} subdirectories ignored due to regex filter '{config.regex_filter}'")
+    print()
+
     return tuple(sorted(result))
 
 
@@ -215,6 +228,9 @@ def main() -> None:
     try:
         config = parse_cmd_line_args()
         source_list = get_sorted_subdirs(config)
+        if not source_list:
+            print("No relevant subdirectories found - nothing to copy.")
+            return
         summary = copy_subdirs(config, source_list)
         print_summary(config, summary)
     except InvalidConfigurationError as e:
