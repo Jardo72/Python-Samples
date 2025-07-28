@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import copytree
-from time import perf_counter, sleep
+from time import perf_counter
 
 
 @dataclass(frozen=True)
@@ -153,37 +153,37 @@ def copy_subdir(request: CopyRequest) -> CopyResult:
 
 def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> Summary:
     Path(config.destination_path).mkdir(parents=True, exist_ok=True)
-    executor = ThreadPoolExecutor(max_workers=config.workers)
     stopwatch = Stopwatch()
     future_list = []
 
-    for source in source_list:
-        destination = Path(config.destination_path) / Path(source).name
-        request = CopyRequest(
-            source=source,
-            destination=str(destination)
-        )
-        future = executor.submit(copy_subdir, request)
-        future_list.append(future)
-    
-    success_count = 0
-    failure_count = 0
-    for future in future_list:
-        result = future.result()
-        if result.exception is None:
-            formatted_duration = format_duration(result.duration_millis)
-            print(f"Successfully copied {result.request.source} to {result.request.destination} in {result.duration_millis} ms ({formatted_duration})")
-            success_count += 1
-        else:
-            print(f"Failed to copy {result.request.source} to {result.request.destination}")
-            print(str(result.exception))
-            failure_count += 1
+    with ThreadPoolExecutor(max_workers=config.workers) as executor:
+        for source in source_list:
+            destination = Path(config.destination_path) / Path(source).name
+            request = CopyRequest(
+                source=source,
+                destination=str(destination)
+            )
+            future = executor.submit(copy_subdir, request)
+            future_list.append(future)
+        
+        success_count = 0
+        failure_count = 0
+        for future in future_list:
+            result = future.result()
+            if result.exception is None:
+                formatted_duration = format_duration(result.duration_millis)
+                print(f"Successfully copied {result.request.source} to {result.request.destination} in {result.duration_millis} ms ({formatted_duration})")
+                success_count += 1
+            else:
+                print(f"Failed to copy {result.request.source} to {result.request.destination}")
+                print(str(result.exception))
+                failure_count += 1
 
-    return Summary(
-        overall_duration_millis=stopwatch.elapsed_time_millis(),
-        success_count= success_count,
-        failure_count=failure_count
-    )
+        return Summary(
+            overall_duration_millis=stopwatch.elapsed_time_millis(),
+            success_count= success_count,
+            failure_count=failure_count
+        )
 
 
 def format_duration(duration_millis: int) -> str:
