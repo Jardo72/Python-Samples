@@ -40,13 +40,15 @@ class Configuration:
     source_path: str
     destination_path: str
     regex_filter: Optional[str]
-    workers: Optional[int]
+    workers: int
     dry_run: bool
 
     def __post_init__(self) -> None:
         if not Path(self.source_path).is_dir():
             raise InvalidConfigurationError(f"Source path '{self.source_path}' is not a valid directory.")
-        if self.workers is not None and not 1 <= self.workers <= MAX_WORKERS:
+        if self.source_path == self.destination_path:
+            raise InvalidConfigurationError("Source and destination paths must be different.")
+        if not 1 <= self.workers <= MAX_WORKERS:
             raise InvalidConfigurationError(f"Number of workers must be a positive integer between 1 and {MAX_WORKERS}")
 
 
@@ -78,7 +80,6 @@ class Stopwatch:
     @staticmethod
     def start() -> Stopwatch:
         return Stopwatch()
-
 
     def elapsed_time_millis(self) -> int:
         duration = perf_counter() - self._start_time
