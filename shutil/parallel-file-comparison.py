@@ -20,15 +20,12 @@ from __future__ import annotations
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
-from os import walk
+from math import ceil
+from os import cpu_count, walk
 from pathlib import Path
-from pprint import pprint
 from time import perf_counter
 from traceback import print_exc
 from zlib import crc32
-
-
-MAX_WORKERS = 16
 
 
 class InvalidConfigurationError(Exception):
@@ -39,7 +36,6 @@ class InvalidConfigurationError(Exception):
 class Configuration:
     source_path: str
     destination_path: str
-    workers: int
 
     def __post_init__(self) -> None:
         if not Path(self.source_path).is_dir():
@@ -48,6 +44,15 @@ class Configuration:
             raise InvalidConfigurationError(f"Destination path '{self.destination_path}' is not a valid directory.")
         if self.source_path == self.destination_path:
             raise InvalidConfigurationError("Source and destination paths must be different.")
+
+    @property
+    def worker_count_per_collector(self) -> int:
+        cpu_count_value = cpu_count()
+        if cpu_count_value is None or cpu_count_value <= 1:
+            return 1
+        return ceil(cpu_count_value / 2)
+
+
 
 
 @dataclass(frozen=True)
@@ -62,32 +67,11 @@ class FileChecksum:
     checksum: str
 
 
-def calculate_crc32(filepath: str) -> str:
-    checksum = 0
-    with open(filepath, "rb") as file:
-        for chunk in iter(lambda: file.read(256 * 1024), b""):
-            checksum = crc32(chunk, checksum)
-    return hex(checksum & 0xFFFFFFFF)  # Ensure the result is unsigned
-
-
-def process_request(request: Request) -> tuple[FileChecksum, ...]:
-    result = []
-    for file in request.files:
-        file_path = Path(request.path) / file
-        if file_path.is_file():
-            crc32_value = calculate_crc32(str(file_path))
-            result.append(FileChecksum(
-                filename=str(file_path),
-                checksum=crc32_value
-            ))
-    return tuple(result)
-
-
 class CRC32Collector:
 
-    def __init__(self, root_path: str, max_workers: int) -> None:
+    def __init__(self, root_path: str, worker_count: int) -> None:
         self._root_path = root_path
-        self._executor = ProcessPoolExecutor(max_workers=max_workers)
+        self._executor = ProcessPoolExecutor(max_workers=worker_count)
 
     def collect(self) -> tuple[FileChecksum, ...]:
         future_list = []
@@ -107,6 +91,20 @@ class CRC32Collector:
                 print(f"An error occurred while processing: {e}")
                 print_exc()
         return tuple(result)
+
+
+class Comparator:
+
+    def __init__(self, config: Configuration) -> None:
+        self._source_crc_collector = CRC32Collector(config.source_path, config.worker_count_per_collector)
+        self._destination_crc_collector = CRC32Collector(config.destination_path, config.worker_count_per_collector)
+
+    def compare(self) -> None:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            source_future = executor.submit(lambda: self._source_crc_collector.collect())
+            destination_future = executor.submit(lambda: self._destination_crc_collector.collect())
+        source_checksums = source_future.result()
+        destination_checksums = destination_future.result()
 
 
 class Stopwatch:
@@ -149,13 +147,6 @@ def create_cmd_line_args_parser() -> ArgumentParser:
         help = "path to the destination directory for the comparison",
         type=str)
 
-    # optional arguments
-    parser.add_argument("-w", "--workers",
-        dest="workers",
-        default=4,
-        help=f"optional number of worker threads to be used (default = 4, max = {MAX_WORKERS})",
-        type=int)
-
     return parser
 
 
@@ -165,8 +156,28 @@ def parse_cmd_line_args() -> Configuration:
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
-        workers=params.workers,
     )
+
+
+def calculate_crc32(filepath: str) -> str:
+    checksum = 0
+    with open(filepath, "rb") as file:
+        for chunk in iter(lambda: file.read(256 * 1024), b""):
+            checksum = crc32(chunk, checksum)
+    return hex(checksum & 0xFFFFFFFF)  # Ensure the result is unsigned
+
+
+def process_request(request: Request) -> tuple[FileChecksum, ...]:
+    result = []
+    for file in request.files:
+        file_path = Path(request.path) / file
+        if file_path.is_file():
+            crc32_value = calculate_crc32(str(file_path))
+            result.append(FileChecksum(
+                filename=str(file_path),
+                checksum=crc32_value
+            ))
+    return tuple(result)
 
 
 def format_duration(duration_millis: int) -> str:
@@ -176,15 +187,21 @@ def format_duration(duration_millis: int) -> str:
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 
+def print_summary(config: Configuration, duration_millis: int) -> None:
+    print()
+    print(f"Elapsed time:          {duration_millis} ms ({format_duration(duration_millis)})")
+    print(f"Workers per collector: {config.worker_count_per_collector}")
+    print()
+
+
 def main() -> None:
     try:
         config = parse_cmd_line_args()
-        crc_collector = CRC32Collector(config.source_path, config.workers)
-        file_checksum_list = crc_collector.collect()
-        print()
-        print(f"Collected {len(file_checksum_list)} file checksums from '{config.source_path}'.")
-        pprint(file_checksum_list)
-        print(f"Collected {len(file_checksum_list)} file checksums from '{config.source_path}'.")
+        comparator = Comparator(config)
+        stopwatch = Stopwatch.start()
+        comparator.compare()
+        duration_millis = stopwatch.elapsed_time_millis()
+        print_summary(config, duration_millis)
     except InvalidConfigurationError as e:
         print("ERROR!!! Invalid command line arguments.")
         print(str(e))
