@@ -20,6 +20,7 @@ from __future__ import annotations
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
+from json import dump
 from math import ceil
 from os import cpu_count, walk
 from pathlib import Path
@@ -36,6 +37,7 @@ class InvalidConfigurationError(Exception):
 class Configuration:
     source_path: str
     destination_path: str
+    diff_details_report: str
 
     def __post_init__(self) -> None:
         if not Path(self.source_path).is_dir():
@@ -53,18 +55,48 @@ class Configuration:
         return ceil(cpu_count_value / 2)
 
 
-
-
 @dataclass(frozen=True)
 class Request:
+    root_path: str
     path: str
     files: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class FileChecksum:
+    root_path: str
     filename: str
     checksum: str
+
+    @property
+    def relative_path(self) -> str:
+        return Path(self.filename).relative_to(self.root_path).as_posix()
+
+
+@dataclass(frozen=True)
+class ChecksumDiscrepancy:
+    source_checksum: FileChecksum
+    destination_checksum: FileChecksum
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    files_missing_in_source: tuple[str, ...]
+    files_missing_in_destination: tuple[str, ...]
+    checksum_discrepancies: tuple[ChecksumDiscrepancy, ...]
+    duration_millis: int
+
+    @property
+    def number_of_files_missing_in_source(self) -> int:
+        return len(self.files_missing_in_source)
+
+    @property
+    def number_of_files_missing_in_destination(self) -> int:
+        return len(self.files_missing_in_destination)
+
+    @property
+    def number_of_checksum_discrepancies(self) -> int:
+        return len(self.checksum_discrepancies)
 
 
 class CRC32Collector:
@@ -77,6 +109,7 @@ class CRC32Collector:
         future_list = []
         for dir, _, files in walk(self._root_path, topdown=True):
             request = Request(
+                root_path=self._root_path,
                 path=dir,
                 files=tuple(files)
             )
@@ -92,6 +125,9 @@ class CRC32Collector:
                 print_exc()
         return tuple(result)
 
+    def __del__(self) -> None:
+        self._executor.shutdown(wait=True)
+
 
 class Comparator:
 
@@ -99,12 +135,36 @@ class Comparator:
         self._source_crc_collector = CRC32Collector(config.source_path, config.worker_count_per_collector)
         self._destination_crc_collector = CRC32Collector(config.destination_path, config.worker_count_per_collector)
 
-    def compare(self) -> None:
+    @staticmethod
+    def _convert_to_dict(checksums: tuple[FileChecksum, ...]) -> dict[str, FileChecksum]:
+        return {file_checksum.relative_path: file_checksum for file_checksum in checksums}
+
+    def compare(self) -> ComparisonResult:
         with ThreadPoolExecutor(max_workers=2) as executor:
+            stopwatch = Stopwatch.start()
             source_future = executor.submit(lambda: self._source_crc_collector.collect())
             destination_future = executor.submit(lambda: self._destination_crc_collector.collect())
-        source_checksums = source_future.result()
-        destination_checksums = destination_future.result()
+        duration_millis = stopwatch.elapsed_time_millis()
+        source_checksums = self._convert_to_dict(source_future.result())
+        destination_checksums = self._convert_to_dict(destination_future.result())
+        files_missing_in_source = tuple(
+            file for file in destination_checksums if file not in source_checksums
+        )
+        files_missing_in_destination = tuple(
+            file for file in source_checksums if file not in destination_checksums
+        )
+        checksum_discrepancies = tuple(
+            ChecksumDiscrepancy(source_checksum, destination_checksum)
+            for rel_path, source_checksum in source_checksums.items()
+            if (destination_checksum := destination_checksums.get(rel_path)) and
+               source_checksum.checksum != destination_checksum.checksum
+        )
+        return ComparisonResult(
+            files_missing_in_source=files_missing_in_source,
+            files_missing_in_destination=files_missing_in_destination,
+            checksum_discrepancies=checksum_discrepancies,
+            duration_millis=duration_millis,
+        )
 
 
 class Stopwatch:
@@ -124,11 +184,12 @@ class Stopwatch:
 def epilog() -> str:
     return """
 This script compares the files in the given source directory structure with the files
-in the given destination directory structure. The comparison is recursive and parallel,
-with configurable number of worker processes per directory structure. For each file,
-the script checks if the file exists in both directories and if the contents are identical.
-The comparison of the contents is done using a hash function to ensure that the files are
-identical.
+in the given destination directory structure. The comparison is recursive and parallel.
+For each file, the script checks if the file exists in both directories and if the
+contents are identical. The comparison of the contents is done using a hash function
+to ensure that the files are identical. After the comparison, the script generates a
+detailed report of the differences found in form of a JSON file. In addition, it
+prints a summary of the comparison to the console.
 """
 
 
@@ -146,6 +207,9 @@ def create_cmd_line_args_parser() -> ArgumentParser:
     parser.add_argument("destination_path",
         help = "path to the destination directory for the comparison",
         type=str)
+    parser.add_argument("diff_details_report",
+        help="filename of the output diff details report",
+        type=str)
 
     return parser
 
@@ -156,6 +220,7 @@ def parse_cmd_line_args() -> Configuration:
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
+        diff_details_report=params.diff_details_report,
     )
 
 
@@ -174,8 +239,9 @@ def process_request(request: Request) -> tuple[FileChecksum, ...]:
         if file_path.is_file():
             crc32_value = calculate_crc32(str(file_path))
             result.append(FileChecksum(
+                root_path=request.root_path,
                 filename=str(file_path),
-                checksum=crc32_value
+                checksum=crc32_value,
             ))
     return tuple(result)
 
@@ -187,10 +253,39 @@ def format_duration(duration_millis: int) -> str:
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 
-def print_summary(config: Configuration, duration_millis: int) -> None:
+def write_json_report(comparison_result: ComparisonResult, filename: str) -> None:
+    with open(filename, 'w', encoding='utf-8') as file:
+        report_data = {
+            "files_missing_in_source": comparison_result.files_missing_in_source,
+            "files_missing_in_destination": comparison_result.files_missing_in_destination,
+            "checksum_discrepancies": [
+                {
+                    "source_checksum": {
+                        "relative_path": discrepancy.source_checksum.relative_path,
+                        "checksum": discrepancy.source_checksum.checksum
+                    },
+                    "destination_checksum": {
+                        "relative_path": discrepancy.destination_checksum.relative_path,
+                        "checksum": discrepancy.destination_checksum.checksum
+                    }
+                } for discrepancy in comparison_result.checksum_discrepancies
+            ]
+        }
+        dump(report_data, file, indent=4)
+        print()
+        print(f"Diff details report written to '{filename}'")
+
+
+def print_summary(config: Configuration, comparison_result: ComparisonResult) -> None:
     print()
-    print(f"Elapsed time:          {duration_millis} ms ({format_duration(duration_millis)})")
-    print(f"Workers per collector: {config.worker_count_per_collector}")
+    print(f"Source path:                  {config.source_path}")
+    print(f"Destination path:             {config.destination_path}")
+    print(f"Workers per collector:        {config.worker_count_per_collector}")
+    formatted_duration = format_duration(comparison_result.duration_millis)
+    print(f"Elapsed time:                 {comparison_result.duration_millis} ms ({formatted_duration})")
+    print(f"Files missing in source:      {comparison_result.number_of_files_missing_in_source}")
+    print(f"Files missing in destination: {comparison_result.number_of_files_missing_in_destination}")
+    print(f"Checksum discrepancies:       {comparison_result.number_of_checksum_discrepancies}")
     print()
 
 
@@ -198,10 +293,9 @@ def main() -> None:
     try:
         config = parse_cmd_line_args()
         comparator = Comparator(config)
-        stopwatch = Stopwatch.start()
-        comparator.compare()
-        duration_millis = stopwatch.elapsed_time_millis()
-        print_summary(config, duration_millis)
+        comparison_result = comparator.compare()
+        print_summary(config, comparison_result)
+        write_json_report(comparison_result, config.diff_details_report)
     except InvalidConfigurationError as e:
         print("ERROR!!! Invalid command line arguments.")
         print(str(e))
