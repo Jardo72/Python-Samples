@@ -85,6 +85,8 @@ class ComparisonResult:
     files_missing_in_destination: tuple[str, ...]
     checksum_discrepancies: tuple[ChecksumDiscrepancy, ...]
     duration_millis: int
+    number_of_files_in_source: int = 0
+    number_of_files_in_destination: int = 0
 
     @property
     def number_of_files_missing_in_source(self) -> int:
@@ -160,6 +162,8 @@ class Comparator:
                source_checksum.checksum != destination_checksum.checksum
         )
         return ComparisonResult(
+            number_of_files_in_source=len(source_checksums),
+            number_of_files_in_destination=len(destination_checksums),
             files_missing_in_source=files_missing_in_source,
             files_missing_in_destination=files_missing_in_destination,
             checksum_discrepancies=checksum_discrepancies,
@@ -274,6 +278,7 @@ def write_json_report(comparison_result: ComparisonResult, filename: str) -> Non
         dump(report_data, file, indent=4)
         print()
         print(f"Diff details report written to '{filename}'")
+        print()
 
 
 def print_summary(config: Configuration, comparison_result: ComparisonResult) -> None:
@@ -283,6 +288,8 @@ def print_summary(config: Configuration, comparison_result: ComparisonResult) ->
     print(f"Workers per collector:        {config.worker_count_per_collector}")
     formatted_duration = format_duration(comparison_result.duration_millis)
     print(f"Elapsed time:                 {comparison_result.duration_millis} ms ({formatted_duration})")
+    print(f"Files checked in source:      {comparison_result.number_of_files_in_source}")
+    print(f"Files checked in destination: {comparison_result.number_of_files_in_destination}")
     print(f"Files missing in source:      {comparison_result.number_of_files_missing_in_source}")
     print(f"Files missing in destination: {comparison_result.number_of_files_missing_in_destination}")
     print(f"Checksum discrepancies:       {comparison_result.number_of_checksum_discrepancies}")
