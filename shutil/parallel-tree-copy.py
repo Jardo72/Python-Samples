@@ -31,10 +31,6 @@ from typing import Optional
 MAX_WORKERS = 16
 
 
-class InvalidConfigurationError(Exception):
-    ...
-
-
 @dataclass(frozen=True)
 class Configuration:
     source_path: str
@@ -42,14 +38,6 @@ class Configuration:
     regex_filter: Optional[str]
     workers: int
     dry_run: bool
-
-    def __post_init__(self) -> None:
-        if not Path(self.source_path).is_dir():
-            raise InvalidConfigurationError(f"Source path '{self.source_path}' is not a valid directory.")
-        if self.source_path == self.destination_path:
-            raise InvalidConfigurationError("Source and destination paths must be different.")
-        if not 1 <= self.workers <= MAX_WORKERS:
-            raise InvalidConfigurationError(f"Number of workers must be a positive integer between 1 and {MAX_WORKERS}")
 
 
 @dataclass(frozen=True)
@@ -134,6 +122,12 @@ def create_cmd_line_args_parser() -> ArgumentParser:
 def parse_cmd_line_args() -> Configuration:
     parser = create_cmd_line_args_parser()
     params = parser.parse_args()
+    if not Path(params.source_path).is_dir():
+        params.error(f"Source path '{params.source_path}' is not a valid directory.")
+    if params.source_path == params.destination_path:
+        params.error("Source and destination paths must be different.")
+    if not 1 <= params.workers <= MAX_WORKERS:
+        params.error(f"Number of workers must be a positive integer between 1 and {MAX_WORKERS}")
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
@@ -248,10 +242,6 @@ def main() -> None:
             return
         summary = copy_subdirs(config, source_list)
         print_summary(config, summary)
-    except InvalidConfigurationError as e:
-        print("ERROR!!! Invalid command line arguments.")
-        print(str(e))
-        exit(1)
     except Exception as e:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()

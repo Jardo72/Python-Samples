@@ -23,11 +23,11 @@ from random import random
 async def get_message(i: int) -> str:
     duration = 10 * random()
     await sleep(duration)
-    return f"Message #{i} (sleep = {duration} sec)"
+    return f"Message #{i} (sleep = {duration:.2f} sec)"
 
 
 async def run_test() -> tuple[str, ...]:
-    couroutines = [get_message(i) for i in range(1, 20)]
+    couroutines = [get_message(i) for i in range(1, 21)]
     result = []
     for future in as_completed(couroutines):
         message = await future

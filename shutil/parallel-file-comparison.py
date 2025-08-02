@@ -29,23 +29,11 @@ from traceback import print_exc
 from zlib import crc32
 
 
-class InvalidConfigurationError(Exception):
-    ...
-
-
 @dataclass(frozen=True)
 class Configuration:
     source_path: str
     destination_path: str
     diff_details_report: str
-
-    def __post_init__(self) -> None:
-        if not Path(self.source_path).is_dir():
-            raise InvalidConfigurationError(f"Source path '{self.source_path}' is not a valid directory.")
-        if not Path(self.destination_path).is_dir():
-            raise InvalidConfigurationError(f"Destination path '{self.destination_path}' is not a valid directory.")
-        if self.source_path == self.destination_path:
-            raise InvalidConfigurationError("Source and destination paths must be different.")
 
     @property
     def worker_count_per_collector(self) -> int:
@@ -221,6 +209,12 @@ def create_cmd_line_args_parser() -> ArgumentParser:
 def parse_cmd_line_args() -> Configuration:
     parser = create_cmd_line_args_parser()
     params = parser.parse_args()
+    if not Path(params.source_path).is_dir():
+        parser.error(f"Source path '{params.source_path}' is not a valid directory.")
+    if not Path(params.destination_path).is_dir():
+        parser.error(f"Destination path '{params.destination_path}' is not a valid directory.")
+    if params.source_path == params.destination_path:
+        parser.error("Source and destination paths must be different.")
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
@@ -303,11 +297,7 @@ def main() -> None:
         comparison_result = comparator.compare()
         print_summary(config, comparison_result)
         write_json_report(comparison_result, config.diff_details_report)
-    except InvalidConfigurationError as e:
-        print("ERROR!!! Invalid command line arguments.")
-        print(str(e))
-        exit(1)
-    except Exception as e:
+    except Exception:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()
         exit(1)
