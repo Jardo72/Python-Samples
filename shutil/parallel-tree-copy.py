@@ -20,6 +20,8 @@ from __future__ import annotations
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
+from os import cpu_count
 from pathlib import Path
 from re import compile, IGNORECASE
 from shutil import copytree
@@ -42,6 +44,7 @@ class Configuration:
 
 @dataclass(frozen=True)
 class CopyRequest:
+    seq_no: int
     source: str
     destination: str
 
@@ -159,8 +162,17 @@ def get_sorted_subdirs(config: Configuration) -> tuple[str, ...]:
     return tuple(sorted(result))
 
 
+def print_prestart_info(config: Configuration, source_list: tuple[str, ...]) -> None:
+    current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
+    print()
+    print(f"Going to copy {len(source_list)} subdirectories from '{config.source_path}' to '{config.destination_path}'")
+    print(f"{cpu_count()} CPU core(s) detected, {config.workers} worker thread(s) will be used")
+    print(f"Start time {current_timestamp}")
+    print()
+
+
 def copy_subdir(request: CopyRequest, dry_run: bool) -> CopyResult:
-    print(f"Going to copy '{request.source}' to '{request.destination}")
+    print(f"Going to copy '{request.source}' to '{request.destination}' (request #{request.seq_no})")
     stopwatch = Stopwatch.start()
     try:
         if not dry_run:
@@ -182,16 +194,19 @@ def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> Summary
     Path(config.destination_path).mkdir(parents=True, exist_ok=True)
     stopwatch = Stopwatch()
     future_list = []
+    sequence = 1
 
     with ThreadPoolExecutor(max_workers=config.workers) as executor:
         for source in source_list:
             destination = Path(config.destination_path) / Path(source).name
             request = CopyRequest(
+                seq_no=sequence,
                 source=source,
                 destination=str(destination)
             )
             future = executor.submit(copy_subdir, request, config.dry_run)
             future_list.append(future)
+            sequence += 1
         
         success_count = 0
         failure_count = 0
@@ -240,6 +255,7 @@ def main() -> None:
         if not source_list:
             print("No relevant subdirectories found - nothing to copy.")
             return
+        print_prestart_info(config, source_list)
         summary = copy_subdirs(config, source_list)
         print_summary(config, summary)
     except Exception as e:
