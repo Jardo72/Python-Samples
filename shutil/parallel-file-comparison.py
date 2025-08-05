@@ -16,7 +16,6 @@
 # limitations under the License.
 #
 
-from __future__ import annotations
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -24,9 +23,10 @@ from json import dump
 from math import ceil
 from os import cpu_count, walk
 from pathlib import Path
-from time import perf_counter
 from traceback import print_exc
 from zlib import crc32
+
+from commons import format_duration, Stopwatch
 
 
 @dataclass(frozen=True)
@@ -159,20 +159,6 @@ class Comparator:
         )
 
 
-class Stopwatch:
-
-    def __init__(self) -> None:
-        self._start_time = perf_counter()
-
-    @staticmethod
-    def start() -> Stopwatch:
-        return Stopwatch()
-
-    def elapsed_time_millis(self) -> int:
-        duration = perf_counter() - self._start_time
-        return int(1000 * duration)
-
-
 def epilog() -> str:
     return """
 This script compares the files in the given source directory structure with the files
@@ -242,13 +228,6 @@ def process_request(request: Request) -> tuple[FileChecksum, ...]:
                 checksum=crc32_value,
             ))
     return tuple(result)
-
-
-def format_duration(duration_millis: int) -> str:
-    duration_sec = round(duration_millis / 1000)
-    hours, remainder = divmod(duration_sec, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 
 def write_json_report(comparison_result: ComparisonResult, filename: str) -> None:

@@ -16,7 +16,6 @@
 # limitations under the License.
 #
 
-from __future__ import annotations
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
