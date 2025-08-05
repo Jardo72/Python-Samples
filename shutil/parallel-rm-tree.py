@@ -24,7 +24,8 @@ from os import listdir, remove
 from os.path import isdir, join
 from pathlib import Path
 from shutil import rmtree
-from time import perf_counter
+
+from commons import format_duration, Sequence, Stopwatch
 
 
 MAX_WORKERS = 16
@@ -39,6 +40,7 @@ class Configuration:
 
 @dataclass(frozen=True)
 class Request:
+    seq_no: int
     path: str
     dry_run: bool
 
@@ -48,20 +50,6 @@ class Summary:
     duration_millis: int
     removed_tree_count: int
     failure_count: int
-
-
-class Stopwatch:
-
-    def __init__(self) -> None:
-        self._start_time = perf_counter()
-
-    @staticmethod
-    def start() -> Stopwatch:
-        return Stopwatch()
-
-    def elapsed_time_millis(self) -> int:
-        duration = perf_counter() - self._start_time
-        return int(1000 * duration)
 
 
 def epilog() -> str:
@@ -116,20 +104,22 @@ def parse_cmd_line_args() -> Configuration:
 
 def remove_directory(request: Request) -> None:
     if request.dry_run:
-        print(f"Would remove directory: {request.path}")
+        print(f"Would remove directory: '{request.path}' (request #{request.seq_no})")
     else:
-        print(f"Removing directory: {request.path}")
+        print(f"Removing directory: '{request.path}' (request #{request.seq_no})")
         rmtree(request.path, ignore_errors=False)
 
 
 def remove_subdir_trees(config: Configuration) -> Summary:
     with ThreadPoolExecutor(max_workers=config.workers) as executor:
-        future_list = []
         stopwatch = Stopwatch.start()
+        future_list = []
+        sequence = Sequence()
         for entry in listdir(config.root_path):
             entry_path = join(config.root_path, entry)
             if isdir(entry_path):
                 request = Request(
+                    seq_no=sequence.next_value(),
                     path=entry_path,
                     dry_run=config.dry_run,
                 )
@@ -154,13 +144,6 @@ def remove_subdir_trees(config: Configuration) -> Summary:
             removed_tree_count=removed_tree_count,
             failure_count=failure_count,
         )
-
-
-def format_duration(duration_millis: int) -> str:
-    duration_sec = round(duration_millis / 1000)
-    hours, remainder = divmod(duration_sec, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 
 def print_summary(summary: Summary) -> None:

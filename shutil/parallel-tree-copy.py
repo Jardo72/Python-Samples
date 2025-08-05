@@ -25,9 +25,10 @@ from os import cpu_count
 from pathlib import Path
 from re import compile, IGNORECASE
 from shutil import copytree
-from time import perf_counter
 from traceback import print_exc
 from typing import Optional
+
+from commons import format_duration, Sequence, Stopwatch
 
 
 MAX_WORKERS = 16
@@ -61,20 +62,6 @@ class Summary:
     overall_duration_millis: int
     success_count: int
     failure_count: int
-
-
-class Stopwatch:
-
-    def __init__(self) -> None:
-        self._start_time = perf_counter()
-
-    @staticmethod
-    def start() -> Stopwatch:
-        return Stopwatch()
-
-    def elapsed_time_millis(self) -> int:
-        duration = perf_counter() - self._start_time
-        return int(1000 * duration)
 
 
 def epilog() -> str:
@@ -183,6 +170,7 @@ def copy_subdir(request: CopyRequest, dry_run: bool) -> CopyResult:
             duration_millis=duration_millis
         )
     except Exception as e:
+        print_exc()
         return CopyResult(
             request=request,
             duration_millis=stopwatch.elapsed_time_millis(),
@@ -194,19 +182,18 @@ def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> Summary
     Path(config.destination_path).mkdir(parents=True, exist_ok=True)
     stopwatch = Stopwatch()
     future_list = []
-    sequence = 1
+    sequence = Sequence()
 
     with ThreadPoolExecutor(max_workers=config.workers) as executor:
         for source in source_list:
             destination = Path(config.destination_path) / Path(source).name
             request = CopyRequest(
-                seq_no=sequence,
+                seq_no=sequence.next_value(),
                 source=source,
                 destination=str(destination)
             )
             future = executor.submit(copy_subdir, request, config.dry_run)
             future_list.append(future)
-            sequence += 1
         
         success_count = 0
         failure_count = 0
@@ -223,21 +210,14 @@ def copy_subdirs(config: Configuration, source_list: tuple[str, ...]) -> Summary
 
         return Summary(
             overall_duration_millis=stopwatch.elapsed_time_millis(),
-            success_count= success_count,
+            success_count=success_count,
             failure_count=failure_count
         )
 
 
-def format_duration(duration_millis: int) -> str:
-    duration_sec = round(duration_millis / 1000)
-    hours, remainder = divmod(duration_sec, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
-
-
 def print_summary(config: Configuration, summary: Summary) -> None:
-    print()
     formatted_duration = format_duration(summary.overall_duration_millis)
+    print()
     print(f"Source path:                        {config.source_path}")
     print(f"Destination path:                   {config.destination_path}")
     print(f"Workers:                            {config.workers}")
