@@ -305,7 +305,7 @@ def main() -> None:
         print_prestart_info(config)
         summary = apply_ownership_and_permissions(config)
         print_summary(config, summary)
-    except Exception as e:
+    except Exception:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()
         exit(1)

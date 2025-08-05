@@ -237,7 +237,7 @@ def main() -> None:
         print_prestart_info(config, source_list)
         summary = copy_subdirs(config, source_list)
         print_summary(config, summary)
-    except Exception as e:
+    except Exception:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()
         exit(1)

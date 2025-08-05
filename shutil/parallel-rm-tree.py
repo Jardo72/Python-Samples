@@ -174,7 +174,7 @@ def main() -> None:
         print_prestart_info(config)
         summary = remove_subdir_trees(config)
         print_summary(summary)
-    except Exception as e:
+    except Exception:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()
         exit(1)
