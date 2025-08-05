@@ -19,6 +19,7 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from json import dump
 from math import ceil
 from os import cpu_count, walk
@@ -208,6 +209,15 @@ def parse_cmd_line_args() -> Configuration:
     )
 
 
+def print_prestart_info(config: Configuration) -> None:
+    current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
+    print()
+    print(f"Going to compare '{config.source_path}' with '{config.destination_path}'")
+    print(f"{cpu_count()} CPU core(s) detected, {config.worker_count_per_collector} worker(s) per collector will be used")
+    print(f"Start time {current_timestamp}")
+    print()
+
+
 def calculate_crc32(filepath: str) -> str:
     checksum = 0
     with open(filepath, "rb") as file:
@@ -272,6 +282,7 @@ def print_summary(config: Configuration, comparison_result: ComparisonResult) ->
 def main() -> None:
     try:
         config = parse_cmd_line_args()
+        print_prestart_info(config)
         comparator = Comparator(config)
         comparison_result = comparator.compare()
         print_summary(config, comparison_result)

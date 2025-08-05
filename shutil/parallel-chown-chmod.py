@@ -72,7 +72,7 @@ class Summary:
     exception_count: int
 
 
-class Prcessor:
+class Processor:
     def __init__(self, config: Configuration):
         self._config = config
         self._executor = ProcessPoolExecutor(max_workers=config.workers)
@@ -280,7 +280,7 @@ def process_request(request: Request, dry_run: bool) -> Result:
 
 
 def apply_ownership_and_permissions(config: Configuration) -> Summary:
-    with Prcessor(config) as processor:
+    with Processor(config) as processor:
         return processor.process()
 
 

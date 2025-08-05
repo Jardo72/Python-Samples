@@ -19,10 +19,12 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from os import listdir, remove
+from datetime import datetime
+from os import cpu_count, listdir, remove
 from os.path import isdir, join
 from pathlib import Path
 from shutil import rmtree
+from traceback import print_exc
 
 from commons import format_duration, Sequence, Stopwatch
 
@@ -101,6 +103,15 @@ def parse_cmd_line_args() -> Configuration:
     )
 
 
+def print_prestart_info(config: Configuration) -> None:
+    current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
+    print()
+    print(f"Going to remove files and subdirectories from '{config.root_path}'")
+    print(f"{cpu_count()} CPU core(s) detected, {config.workers} worker thread(s) will be used")
+    print(f"Start time {current_timestamp}")
+    print()
+
+
 def remove_directory(request: Request) -> None:
     if request.dry_run:
         print(f"Would remove directory: '{request.path}' (request #{request.seq_no})")
@@ -158,9 +169,15 @@ def print_summary(summary: Summary) -> None:
 
 
 def main() -> None:
-    config = parse_cmd_line_args()
-    summary = remove_subdir_trees(config)
-    print_summary(summary)
+    try:
+        config = parse_cmd_line_args()
+        print_prestart_info(config)
+        summary = remove_subdir_trees(config)
+        print_summary(summary)
+    except Exception as e:
+        print("ERROR!!! An unexpected exception has occurred.")
+        print_exc()
+        exit(1)
 
 
 if __name__ == "__main__":
