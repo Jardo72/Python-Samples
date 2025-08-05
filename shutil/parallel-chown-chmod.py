@@ -19,10 +19,12 @@
 from argparse import ArgumentParser, RawTextHelpFormatter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from grp import getgrnam
-from os import chmod, walk
+from os import chmod, cpu_count, walk
 from pathlib import Path
 from pwd import getpwnam
+from re import match
 from shutil import chown
 from traceback import print_exc
 
@@ -113,7 +115,7 @@ def create_cmd_line_args_parser() -> ArgumentParser:
         type=str)
     parser.add_argument("permissions",
         help = "the permissions to set (e.g. 640 = read/write for owner, read for group, no permissions for others)",
-        type=int)
+        type=str)
 
     # optional arguments
     parser.add_argument("-w", "--workers",
@@ -136,13 +138,24 @@ def parse_cmd_line_args() -> Configuration:
         parser.error(f"Group with the name '{params.group}' does not exist.")
     if not 1 <= params.workers <= MAX_WORKERS:
         parser.error(f"Number of workers must be a positive integer between 1 and {MAX_WORKERS}")
+    if not match(r'^[0-7]{3}$', params.permissions):
+        parser.error(f"Permissions '{params.permissions}' must be a 3 digit number (e.g. 640).")
     return Configuration(
         root_path=params.root_path,
         user=params.user,
         group=params.group,
-        permissions=params.permissions,
+        permissions=int(params.permissions),
         workers=params.workers,
     )
+
+
+def print_prestart_info(config: Configuration) -> None:
+    current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
+    print()
+    print(f"Going to change ownership & permissions for '{config.root_path}'")
+    print(f"{cpu_count()} CPU core(s) detected, {config.workers} worker thread(s) will be used")
+    print(f"Start time {current_timestamp}")
+    print()
 
 
 def process_request(request: Request) -> Result:
@@ -239,6 +252,7 @@ def print_summary(config: Configuration, summary: Summary) -> None:
 def main() -> None:
     try:
         config = parse_cmd_line_args()
+        print_prestart_info(config)
         summary = apply_ownership_and_permissions(config)
         print_summary(config, summary)
     except Exception as e:
