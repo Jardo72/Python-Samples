@@ -228,7 +228,7 @@ def parse_cmd_line_args() -> Configuration:
         root_path=params.root_path,
         user=params.user,
         group=params.group,
-        permissions=int(params.permissions),
+        permissions=int(params.permissions, 8),
         workers=params.workers,
         dry_run=params.dry_run,
     )
@@ -238,6 +238,7 @@ def print_prestart_info(config: Configuration) -> None:
     current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
     print()
     print(f"Going to change ownership & permissions for '{config.root_path}'")
+    print(f"User '{config.user}', group '{config.group}', permissions {oct(config.permissions)}")
     print(f"{cpu_count()} CPU core(s) detected, {config.workers} worker process(es) will be used")
     print(f"Start time {current_timestamp}")
     print()
