@@ -21,31 +21,27 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from json import dump
-from math import ceil
 from os import cpu_count, walk
 from pathlib import Path
 from traceback import print_exc
 from zlib import crc32
 
-from commons import format_duration, Stopwatch
+from commons import format_duration, Sequence, Stopwatch
 
+
+MAX_WORKERS_PER_PATH = 8
 
 @dataclass(frozen=True)
 class Configuration:
     source_path: str
     destination_path: str
     diff_details_report: str
-
-    @property
-    def worker_count_per_collector(self) -> int:
-        cpu_count_value = cpu_count()
-        if cpu_count_value is None or cpu_count_value <= 1:
-            return 1
-        return ceil(cpu_count_value / 2)
+    workers_per_path: int
 
 
 @dataclass(frozen=True)
 class Request:
+    id: str
     root_path: str
     path: str
     files: tuple[str, ...]
@@ -92,20 +88,24 @@ class ComparisonResult:
 
 class CRC32Collector:
 
-    def __init__(self, root_path: str, worker_count: int) -> None:
+    def __init__(self, name: str, root_path: str, worker_count: int) -> None:
+        self._name = name
         self._root_path = root_path
         self._executor = ProcessPoolExecutor(max_workers=worker_count)
+        self._sequence = Sequence()
 
     def collect(self) -> tuple[FileChecksum, ...]:
         future_list = []
         for dir, _, files in walk(self._root_path, topdown=True):
             request = Request(
+                id=f"{self._name}-{self._sequence.next_value()}",
                 root_path=self._root_path,
                 path=dir,
                 files=tuple(files)
             )
             future = self._executor.submit(process_request, request)
             future_list.append(future)
+        print(f"Traversal of '{self._root_path}' completed, {len(future_list)} requests created for processing")
 
         result = []
         for future in future_list:
@@ -123,8 +123,16 @@ class CRC32Collector:
 class Comparator:
 
     def __init__(self, config: Configuration) -> None:
-        self._source_crc_collector = CRC32Collector(config.source_path, config.worker_count_per_collector)
-        self._destination_crc_collector = CRC32Collector(config.destination_path, config.worker_count_per_collector)
+        self._source_crc_collector = CRC32Collector(
+            "Source",
+            config.source_path,
+            config.workers_per_path,
+        )
+        self._destination_crc_collector = CRC32Collector(
+            "Destination",
+            config.destination_path,
+            config.workers_per_path,
+        )
 
     @staticmethod
     def _convert_to_dict(checksums: tuple[FileChecksum, ...]) -> dict[str, FileChecksum]:
@@ -169,6 +177,11 @@ contents are identical. The comparison of the contents is done using a hash func
 to ensure that the files are identical. After the comparison, the script generates a
 detailed report of the differences found in form of a JSON file. In addition, it
 prints a summary of the comparison to the console.
+
+You can specify the number of workers to be used for the comparison. This parameter
+specifies how many workers will be used to process the files in each of the two paths.
+For instance, if you specify 4 workers per path, the script will use a total of 8 workers
+(4 for the source path and 4 for the destination path).
 """
 
 
@@ -190,6 +203,13 @@ def create_cmd_line_args_parser() -> ArgumentParser:
         help="filename of the output diff details report",
         type=str)
 
+    # optional arguments
+    parser.add_argument("-w", "--workers-per-path",
+        dest="workers_per_path",
+        default=4,
+        help=f"optional number of workers per path to be used (default = 2, max = {MAX_WORKERS_PER_PATH})",
+        type=int)
+
     return parser
 
 
@@ -202,10 +222,13 @@ def parse_cmd_line_args() -> Configuration:
         parser.error(f"Destination path '{params.destination_path}' is not a valid directory.")
     if params.source_path == params.destination_path:
         parser.error("Source and destination paths must be different.")
+    if not 1 <= params.workers_per_path <= MAX_WORKERS_PER_PATH:
+        parser.error(f"Number of workers per path must be a positive integer between 1 and {MAX_WORKERS_PER_PATH}")
     return Configuration(
         source_path=params.source_path,
         destination_path=params.destination_path,
         diff_details_report=params.diff_details_report,
+        workers_per_path=params.workers_per_path,
     )
 
 
@@ -213,7 +236,7 @@ def print_prestart_info(config: Configuration) -> None:
     current_timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z (%z)")
     print()
     print(f"Going to compare '{config.source_path}' with '{config.destination_path}'")
-    print(f"{cpu_count()} CPU core(s) detected, {config.worker_count_per_collector} worker(s) per collector will be used")
+    print(f"{cpu_count()} CPU core(s) detected, {config.workers_per_path} worker(s) per collector will be used")
     print(f"Start time {current_timestamp}")
     print()
 
@@ -227,6 +250,7 @@ def calculate_crc32(filepath: str) -> str:
 
 
 def process_request(request: Request) -> tuple[FileChecksum, ...]:
+    print(f"Going to process request {request.id} for path '{request.path}'")
     result = []
     for file in request.files:
         file_path = Path(request.path) / file
@@ -268,7 +292,7 @@ def print_summary(config: Configuration, comparison_result: ComparisonResult) ->
     print()
     print(f"Source path:                  {config.source_path}")
     print(f"Destination path:             {config.destination_path}")
-    print(f"Workers per collector:        {config.worker_count_per_collector}")
+    print(f"Workers per path:             {config.workers_per_path}")
     formatted_duration = format_duration(comparison_result.duration_millis)
     print(f"Elapsed time:                 {comparison_result.duration_millis} ms ({formatted_duration})")
     print(f"Files checked in source:      {comparison_result.number_of_files_in_source}")
