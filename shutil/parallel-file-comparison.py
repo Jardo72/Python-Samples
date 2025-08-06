@@ -31,6 +31,7 @@ from commons import format_duration, Sequence, Stopwatch
 
 MAX_WORKERS_PER_PATH = 8
 
+
 @dataclass(frozen=True)
 class Configuration:
     source_path: str
@@ -59,19 +60,28 @@ class FileChecksum:
 
 
 @dataclass(frozen=True)
+class CRC32CollectionSummary:
+    root_path: str
+    checksums: tuple[FileChecksum, ...]
+    exception_count: int
+
+
+@dataclass(frozen=True)
 class ChecksumDiscrepancy:
     source_checksum: FileChecksum
     destination_checksum: FileChecksum
 
 
 @dataclass(frozen=True)
-class ComparisonResult:
+class ComparisonSummary:
     files_missing_in_source: tuple[str, ...]
     files_missing_in_destination: tuple[str, ...]
     checksum_discrepancies: tuple[ChecksumDiscrepancy, ...]
     duration_millis: int
-    number_of_files_in_source: int = 0
-    number_of_files_in_destination: int = 0
+    number_of_files_in_source: int
+    number_of_files_in_destination: int
+    source_exception_count: int
+    destination_exception_count: int
 
     @property
     def number_of_files_missing_in_source(self) -> int:
@@ -115,7 +125,7 @@ class CRC32Collector:
         for dir in directories:
             self._scan_directory(dir)
 
-    def _collect_results(self) -> tuple[FileChecksum, ...]:
+    def _create_summary(self) -> CRC32CollectionSummary:
         exception_count = 0
         result = []
         for future in self._future_list:
@@ -125,12 +135,17 @@ class CRC32Collector:
                 exception_count += 1
                 print(f"An error occurred while processing: {e}")
                 print_exc()
-        return tuple(result)
 
-    def collect(self) -> tuple[FileChecksum, ...]:
+        return CRC32CollectionSummary(
+            root_path=self._root_path,
+            checksums=tuple(result),
+            exception_count= exception_count,
+        )
+
+    def collect(self) -> CRC32CollectionSummary:
         self._scan_directory(self._root_path)
-        print(f"Traversal of '{self._root_path}' completed, {len(self._future_list)} requests created...")
-        return self._collect_results()
+        print(f"Traversal of '{self._root_path}' completed ({len(self._future_list)} requests)...")
+        return self._create_summary()
 
 
     def __del__(self) -> None:
@@ -155,14 +170,16 @@ class Comparator:
     def _convert_to_dict(checksums: tuple[FileChecksum, ...]) -> dict[str, FileChecksum]:
         return {file_checksum.relative_path: file_checksum for file_checksum in checksums}
 
-    def compare(self) -> ComparisonResult:
+    def compare(self) -> ComparisonSummary:
         with ThreadPoolExecutor(max_workers=2) as executor:
             stopwatch = Stopwatch.start()
             source_future = executor.submit(lambda: self._source_crc_collector.collect())
             destination_future = executor.submit(lambda: self._destination_crc_collector.collect())
         duration_millis = stopwatch.elapsed_time_millis()
-        source_checksums = self._convert_to_dict(source_future.result())
-        destination_checksums = self._convert_to_dict(destination_future.result())
+        source_summary = source_future.result()
+        destination_summary = destination_future.result()
+        source_checksums = self._convert_to_dict(source_summary.checksums)
+        destination_checksums = self._convert_to_dict(destination_summary.checksums)
         files_missing_in_source = tuple(
             file for file in destination_checksums if file not in source_checksums
         )
@@ -175,13 +192,15 @@ class Comparator:
             if (destination_checksum := destination_checksums.get(rel_path)) and
                source_checksum.checksum != destination_checksum.checksum
         )
-        return ComparisonResult(
+        return ComparisonSummary(
             number_of_files_in_source=len(source_checksums),
             number_of_files_in_destination=len(destination_checksums),
             files_missing_in_source=files_missing_in_source,
             files_missing_in_destination=files_missing_in_destination,
             checksum_discrepancies=checksum_discrepancies,
             duration_millis=duration_millis,
+            source_exception_count=source_summary.exception_count,
+            destination_exception_count=destination_summary.exception_count,
         )
 
 
@@ -281,11 +300,11 @@ def process_request(request: Request) -> tuple[FileChecksum, ...]:
     return tuple(result)
 
 
-def write_json_report(comparison_result: ComparisonResult, filename: str) -> None:
+def write_json_report(comparison_summary: ComparisonSummary, filename: str) -> None:
     with open(filename, 'w', encoding='utf-8') as file:
         report_data = {
-            "files_missing_in_source": comparison_result.files_missing_in_source,
-            "files_missing_in_destination": comparison_result.files_missing_in_destination,
+            "files_missing_in_source": comparison_summary.files_missing_in_source,
+            "files_missing_in_destination": comparison_summary.files_missing_in_destination,
             "checksum_discrepancies": [
                 {
                     "source_checksum": {
@@ -296,7 +315,7 @@ def write_json_report(comparison_result: ComparisonResult, filename: str) -> Non
                         "relative_path": discrepancy.destination_checksum.relative_path,
                         "checksum": discrepancy.destination_checksum.checksum
                     }
-                } for discrepancy in comparison_result.checksum_discrepancies
+                } for discrepancy in comparison_summary.checksum_discrepancies
             ]
         }
         dump(report_data, file, indent=4)
@@ -305,18 +324,20 @@ def write_json_report(comparison_result: ComparisonResult, filename: str) -> Non
         print()
 
 
-def print_summary(config: Configuration, comparison_result: ComparisonResult) -> None:
+def print_summary(config: Configuration, comparison_summary: ComparisonSummary) -> None:
     print()
     print(f"Source path:                  {config.source_path}")
     print(f"Destination path:             {config.destination_path}")
     print(f"Workers per path:             {config.workers_per_path}")
-    formatted_duration = format_duration(comparison_result.duration_millis)
-    print(f"Elapsed time:                 {comparison_result.duration_millis} ms ({formatted_duration})")
-    print(f"Files checked in source:      {comparison_result.number_of_files_in_source}")
-    print(f"Files checked in destination: {comparison_result.number_of_files_in_destination}")
-    print(f"Files missing in source:      {comparison_result.number_of_files_missing_in_source}")
-    print(f"Files missing in destination: {comparison_result.number_of_files_missing_in_destination}")
-    print(f"Checksum discrepancies:       {comparison_result.number_of_checksum_discrepancies}")
+    formatted_duration = format_duration(comparison_summary.duration_millis)
+    print(f"Elapsed time:                 {comparison_summary.duration_millis} ms ({formatted_duration})")
+    print(f"Files checked in source:      {comparison_summary.number_of_files_in_source}")
+    print(f"Files checked in destination: {comparison_summary.number_of_files_in_destination}")
+    print(f"Files missing in source:      {comparison_summary.number_of_files_missing_in_source}")
+    print(f"Files missing in destination: {comparison_summary.number_of_files_missing_in_destination}")
+    print(f"Source exception(s):          {comparison_summary.source_exception_count}")
+    print(f"Destination exception(s):     {comparison_summary.destination_exception_count}")
+    print(f"Checksum discrepancies:       {comparison_summary.number_of_checksum_discrepancies}")
     print()
 
 
@@ -325,9 +346,9 @@ def main() -> None:
         config = parse_cmd_line_args()
         print_prestart_info(config)
         comparator = Comparator(config)
-        comparison_result = comparator.compare()
-        print_summary(config, comparison_result)
-        write_json_report(comparison_result, config.diff_details_report)
+        comparison_summary = comparator.compare()
+        print_summary(config, comparison_summary)
+        write_json_report(comparison_summary, config.diff_details_report)
     except Exception:
         print("ERROR!!! An unexpected exception has occurred.")
         print_exc()
