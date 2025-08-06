@@ -21,7 +21,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from json import dump
-from os import cpu_count, walk
+from os import cpu_count, scandir
 from pathlib import Path
 from traceback import print_exc
 from zlib import crc32
@@ -93,28 +93,45 @@ class CRC32Collector:
         self._root_path = root_path
         self._executor = ProcessPoolExecutor(max_workers=worker_count)
         self._sequence = Sequence()
+        self._future_list = []
 
-    def collect(self) -> tuple[FileChecksum, ...]:
-        future_list = []
-        for dir, _, files in walk(self._root_path, topdown=True):
+    def _scan_directory(self, path: str) -> None:
+        directories = []
+        files = []
+        with scandir(path) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    directories.append(entry.path)
+                elif entry.is_file():
+                    files.append(entry.path)
             request = Request(
                 id=f"{self._name}-{self._sequence.next_value()}",
                 root_path=self._root_path,
-                path=dir,
-                files=tuple(files)
+                path=path,
+                files=tuple(files),
             )
             future = self._executor.submit(process_request, request)
-            future_list.append(future)
-        print(f"Traversal of '{self._root_path}' completed, {len(future_list)} requests created for processing")
+            self._future_list.append(future)
+        for dir in directories:
+            self._scan_directory(dir)
 
+    def _collect_results(self) -> tuple[FileChecksum, ...]:
+        exception_count = 0
         result = []
-        for future in future_list:
+        for future in self._future_list:
             try:
                 result.extend(future.result())
             except Exception as e:
+                exception_count += 1
                 print(f"An error occurred while processing: {e}")
                 print_exc()
         return tuple(result)
+
+    def collect(self) -> tuple[FileChecksum, ...]:
+        self._scan_directory(self._root_path)
+        print(f"Traversal of '{self._root_path}' completed, {len(self._future_list)} requests created...")
+        return self._collect_results()
+
 
     def __del__(self) -> None:
         self._executor.shutdown(wait=True)
