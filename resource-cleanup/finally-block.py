@@ -16,3 +16,21 @@
 # limitations under the License.
 #
 
+
+def main():
+    file = None
+
+    try:
+        file = open("test-file.txt", mode="r")
+        print("Going to read file content...")
+        for line in file.readlines():
+            print(line.strip())
+        print("Finished reading file content...")
+    finally:
+        if file:
+            file.close()
+            print("File closed.")
+
+
+if __name__ == "__main__":
+    main()
