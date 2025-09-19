@@ -16,8 +16,33 @@
 # limitations under the License.
 #
 
+class DummyContextManager:
+
+    def __init__(self, filename: str) -> None:
+        self._filename = filename
+
+    def __enter__(self):
+        print("Entering the context...")
+        return self
+
+    def readlines(self):
+        return [
+            "This is just a dummy text file for testing purposes.",
+            "Do not look for any deeper purpose in this text, it is here just to be read by the Python samples.",
+            "Have a nice day, take care.",
+        ]
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        print("Exiting the context (closing resources...)")
+        if exc_type:
+            print(f"An exception occurred: {exc_value}")
+        else:
+            print("No exceptions occurred.")
+
 def main():
-    ...
+    with DummyContextManager("test-file.txt") as cm:
+        for line in cm.readlines():
+            print(line.strip())
 
 
 if __name__ == "__main__":
