@@ -1,0 +1,3 @@
+This is just a dummy text file for testing purposes.
+Do not look for any deeper purpose in this text, it is here just to be read by the Python samples.
+Have a nice day, take care.
