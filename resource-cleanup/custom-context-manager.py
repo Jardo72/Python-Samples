@@ -36,8 +36,12 @@ class DummyContextManager:
         print("Exiting the context (closing resources...)")
         if exc_type:
             print(f"An exception occurred: {exc_value}")
+            print(f"Exception type: {exc_type}")
+            print("Exception traceback:")
+            print(traceback)
         else:
             print("No exceptions occurred.")
+
 
 def main():
     with DummyContextManager("test-file.txt") as cm:
